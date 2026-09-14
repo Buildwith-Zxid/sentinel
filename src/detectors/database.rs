@@ -20,7 +20,7 @@ impl DatabaseUriDetector {
     pub fn new() -> Self {
         Self {
             uri_regex: Regex::new(
-                r#"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp|mssql)://(?:[a-zA-Z0-9_\-\.]+):([^@\s/]+)@[\w\.\-]+(?::\d+)?(?:/[^\s"';]*)?"#,
+                r#"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp|mssql)://(?:[a-zA-Z0-9_\-\.]*):([^@\s/]+)@[\w\.\-]+(?::\d+)?(?:/[^\s"';]*)?"#,
             )
             .unwrap(),
         }
@@ -97,5 +97,25 @@ mod tests {
         let findings = detector.scan_line(line, 5, Path::new(".env"), &Config::default());
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::High);
+    }
+
+    #[test]
+    fn test_database_uri_redis_empty_username() {
+        let detector = DatabaseUriDetector::new();
+        let line = "REDIS_URL=redis://:K8j2n9Xm4pL1qR5t@cache-cluster.internal:6379/0";
+        let findings = detector.scan_line(line, 2, Path::new(".env"), &Config::default());
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, Severity::High);
+    }
+
+    #[test]
+    fn test_database_uri_credential_free_ignored() {
+        let detector = DatabaseUriDetector::new();
+        let line = "DATABASE_URL=postgres://localhost:5432/production_db";
+        let findings = detector.scan_line(line, 1, Path::new("config.toml"), &Config::default());
+        assert!(
+            findings.is_empty(),
+            "Credential-free database URIs should not produce findings"
+        );
     }
 }

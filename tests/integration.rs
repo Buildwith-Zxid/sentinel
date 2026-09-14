@@ -100,7 +100,7 @@ fn test_false_positive_suppression() {
         .scan(Path::new("tests/fixtures"))
         .expect("Scan should succeed");
 
-    // Safe UUIDs, safe commit SHAs, and safe documentation examples should not produce findings
+    // Safe UUIDs, safe commit SHAs, documentation examples, SHA-256, Docker digests, SRI hashes, templates, etc.
     for finding in &report.findings {
         let file = &finding.file;
         assert!(
@@ -114,6 +114,36 @@ fn test_false_positive_suppression() {
             finding
         );
         assert!(
+            !file.contains("safe_sha256.txt"),
+            "Safe SHA-256 file produced finding: {:?}",
+            finding
+        );
+        assert!(
+            !file.contains("safe_docker.yaml"),
+            "Safe Docker digest file produced finding: {:?}",
+            finding
+        );
+        assert!(
+            !file.contains("safe_integrity.html"),
+            "Safe SRI integrity file produced finding: {:?}",
+            finding
+        );
+        assert!(
+            !file.contains("safe_lockfile.json"),
+            "Safe lockfile produced finding: {:?}",
+            finding
+        );
+        assert!(
+            !file.contains("safe_sourcemap.js"),
+            "Safe sourcemap produced finding: {:?}",
+            finding
+        );
+        assert!(
+            !file.contains("safe_templates.env"),
+            "Safe template env produced finding: {:?}",
+            finding
+        );
+        assert!(
             !file.contains("safe_placeholders.yaml"),
             "Safe placeholders file produced finding: {:?}",
             finding
@@ -122,6 +152,32 @@ fn test_false_positive_suppression() {
             !file.contains("safe_docs.md"),
             "Safe docs file produced finding: {:?}",
             finding
+        );
+    }
+}
+
+#[test]
+fn test_detector_overlap_deduplication() {
+    let mut config = Config::default();
+    config.ignore.patterns = vec![];
+
+    let scanner = Scanner::new(config, None);
+    let report = scanner
+        .scan(Path::new("tests/fixtures"))
+        .expect("Scan should succeed");
+
+    // Ensure that no single line in any file has duplicate findings sharing the same fingerprint
+    let mut seen_line_fingerprints = std::collections::HashSet::new();
+    for finding in &report.findings {
+        let key = (
+            finding.file.clone(),
+            finding.line,
+            finding.fingerprint.clone(),
+        );
+        assert!(
+            seen_line_fingerprints.insert(key.clone()),
+            "Duplicate finding detected on same line with same fingerprint: {:?}",
+            key
         );
     }
 }
@@ -234,6 +290,60 @@ fn test_max_file_size_filter() {
 
     assert_eq!(report.findings.len(), 0);
     assert!(report.stats.files_skipped > 0);
+}
+
+#[test]
+fn test_nonexistent_path_returns_error() {
+    let config = Config::default();
+    let scanner = Scanner::new(config, None);
+    let result = scanner.scan(Path::new("this_path_does_not_exist_xyz123"));
+    assert!(result.is_err(), "Nonexistent scan path should return Err");
+}
+
+#[test]
+fn test_malformed_toml_returns_error() {
+    let bad_toml = "this is not valid toml syntax = [";
+    let tmp_file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(tmp_file.path(), bad_toml).unwrap();
+
+    let result = Config::from_file(tmp_file.path());
+    assert!(result.is_err(), "Malformed config must return Err");
+}
+
+#[test]
+fn test_unicode_and_spaces_in_paths() {
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let sub_dir = tmp_dir.path().join("sub folder with spaces");
+    std::fs::create_dir_all(&sub_dir).unwrap();
+    let file_path = sub_dir.join("unicode_🚀_secret.env");
+    std::fs::write(&file_path, "AWS_KEY=AKIA1122334455667788\n").unwrap();
+
+    let config = Config::default();
+    let scanner = Scanner::new(config, None);
+    let report = scanner
+        .scan(tmp_dir.path())
+        .expect("Scan should succeed on Unicode paths");
+
+    assert_eq!(report.findings.len(), 1);
+    assert_eq!(report.findings[0].detector, "aws_access_key");
+}
+
+#[test]
+fn test_extremely_long_line_handled_safely() {
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let file_path = tmp_dir.path().join("minified.js");
+    // Write 200KB of repetitive non-secret text on a single line
+    let huge_line = format!("var dummy = '{}';\n", "x".repeat(200_000));
+    std::fs::write(&file_path, huge_line).unwrap();
+
+    let config = Config::default();
+    let scanner = Scanner::new(config, None);
+    let report = scanner
+        .scan(tmp_dir.path())
+        .expect("Scan on long line should succeed safely");
+
+    assert_eq!(report.findings.len(), 0);
+    assert_eq!(report.stats.files_scanned, 1);
 }
 
 #[test]

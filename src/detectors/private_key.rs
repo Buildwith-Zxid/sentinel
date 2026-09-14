@@ -18,8 +18,10 @@ impl Default for PrivateKeyDetector {
 impl PrivateKeyDetector {
     pub fn new() -> Self {
         Self {
-            header_regex: Regex::new(r"-----BEGIN\s+(?:[A-Z0-9_\-]+\s+)?PRIVATE\s+KEY-----")
-                .unwrap(),
+            header_regex: Regex::new(
+                r"-----BEGIN\s+(?:[A-Z0-9_\-]+\s+)?PRIVATE\s+KEY(?:\s+BLOCK)?-----",
+            )
+            .unwrap(),
         }
     }
 }
@@ -87,6 +89,9 @@ mod tests {
             "-----BEGIN RSA PRIVATE KEY-----",
             "-----BEGIN OPENSSH PRIVATE KEY-----",
             "-----BEGIN EC PRIVATE KEY-----",
+            "-----BEGIN DSA PRIVATE KEY-----",
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----",
+            "-----BEGIN PGP PRIVATE KEY BLOCK-----",
         ];
 
         for sample in samples {

@@ -1,152 +1,176 @@
 # Sentinel
 
-A fast, local-first security CLI for detecting accidentally exposed secrets and credentials in source code.
+A fast, local-first security CLI for detecting accidentally exposed secrets and credentials in source code repositories.
 
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org/)
-[![CI](https://github.com/buildwith-zxid/sentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/buildwith-zxid/sentinel/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
 
-## Overview
+## What It Does
 
-Sentinel is an independent command-line security tool written in pure Rust. It inspects local source repositories to identify unencrypted secrets—such as API keys, authentication tokens, private keys, database connection strings, and high-entropy credentials—before they are committed or pushed to remote repositories.
+Sentinel is an independent command-line security tool written in 100% native Rust. It recursively inspects source-code repositories to identify unencrypted secrets—such as cloud access keys, authentication tokens, private key blocks, database connection strings, and high-entropy credentials—before they are committed or pushed to remote repositories.
 
-Sentinel operates entirely offline. It does not perform network requests, does not upload source code, and never retains or displays raw credentials in terminal output or exported reports.
-
----
-
-## Why Sentinel?
-
-Accidental secret leakage in source control remains one of the most prevalent attack vectors in software engineering. Developers frequently hardcode tokens during debugging or inadvertently commit `.env` files and configuration dumps.
-
-Existing scanning utilities often introduce heavy runtime requirements (e.g., Python or Node runtimes, Docker containers, or external cloud dependencies), struggle with excessive false positives, or risk credential leakage by printing matched secrets directly to console logs. Sentinel solves this by providing:
-
-1. **Zero Runtime Dependencies**: Compiled into a single, self-contained native executable.
-2. **Leak-Proof Reporting**: Raw secret values are immediately digested into cryptographic SHA-256 fingerprints upon detection; findings and reports only display truncated hashes (`8a21••••91cf`).
-3. **Layered Detection**: Combines regex pattern matching, assignment context evaluation, Shannon entropy distribution, and false-positive suppression.
-4. **Local-First Privacy**: Audits stay strictly on your local machine.
+Sentinel operates strictly offline. It never executes network calls, collects no telemetry, and immediately digests any detected credential into a deterministic SHA-256 fingerprint. Raw secret values are never saved in finding objects, serialized in reports, or printed to terminal or JSON streams.
 
 ---
 
-## Features
+## Why It Exists
 
-- **10 Modular Detectors**: Dedicated engines for AWS, GitHub, Private Keys, Database connection URLs, JWTs, Bearer tokens, Generic API keys, Passwords, Generic credentials, and High-entropy candidates.
-- **Gitignore & Custom Ignore Engine**: Honors `.gitignore` hierarchies, built-in directory exclusions (`.git`, `node_modules`, `target`, `dist`, `.venv`), and custom glob patterns.
-- **Binary Preflight Filter**: Content-based inspection analyzing null bytes and control character ratios in the initial 8KB to skip compiled objects and binary assets without parsing overhead.
-- **Safe File Size Handling**: Skips files exceeding the configurable size threshold (default 5MB) before allocating memory buffers.
-- **Multi-Threaded Traversal**: Leverages `rayon` for safe, parallel multi-core scanning across file trees.
-- **Shannon Entropy Analysis**: Measures character diversity to detect high-entropy secrets while rejecting repetitive sequences and predictable identifiers.
-- **False-Positive Suppression**: Built-in suppressors for standard UUIDs, 40-character Git commit SHAs, and common placeholder strings (`YOUR_KEY`, `EXAMPLE`, `CHANGE_ME`).
-- **Cryptographic Fingerprinting & Allowlists**: Generates SHA-256 digests of matches to allow safe suppression of verified non-secrets via `.sentinel.toml`.
-- **Flexible Reporting**: Professional ANSI terminal output (with `--no-color` and `NO_COLOR` support) or strict machine-readable versioned JSON (`schema_version: 1`).
-- **Deterministic Exit Codes**: Designed for seamless CI/CD integration and pre-commit hooks.
+Accidental credential exposure in source repositories remains one of the primary attack vectors in software development. Developers often temporarily hardcode tokens during testing, leave credentials in local configuration files, or inadvertently check in `.env` files.
 
----
+Existing scanners frequently introduce significant drawbacks:
+- They require runtime dependencies like Python, Node.js, or Docker containers.
+- They generate excessive false positives on UUIDs, commit SHAs, content hashes, and documentation samples.
+- Some tools inadvertently leak credentials by printing matched text verbatim in console output or unredacted log lines.
+- Many tools lack deterministic exit codes and machine-readable output suitable for CI/CD pipelines.
 
-## How It Works
-
-Sentinel processes repositories through an independent, deterministic multi-stage pipeline:
-
-```
-Repository Root
-       ↓
-File Discovery (ignore::WalkBuilder - Gitignore-aware, hidden files, symlinks)
-       ↓
-Ignore Engine (.gitignore + .sentinel.toml + CLI --ignore + default skips)
-       ↓
-File Size Filter (checks filesystem metadata against max_file_size)
-       ↓
-Binary Preflight Inspection (content-based check on first 8KB: null-bytes, control ratio)
-       ↓
-Buffered Line Reader (safe UTF-8 decoding, skipping non-text streams)
-       ↓
-Detector Pipeline (Trait-based modular detectors: Send + Sync)
-  ├── AWS Access Key & Secrets
-  ├── GitHub Tokens (classic, fine-grained, app, OAuth)
-  ├── Private Key blocks (RSA, OpenSSH, EC, generic PKCS#8)
-  ├── Database Connection URIs (Postgres, MySQL, Mongo, Redis, AMQP, MSSQL)
-  ├── JWT Tokens
-  ├── Bearer Tokens
-  ├── Password-like assignments
-  ├── Generic API & Secret Keys
-  ├── Generic Credential-like strings
-  └── High-Entropy Secret Candidates
-       ↓
-Context, Entropy & False-Positive Filter (UUIDs, Git commit SHAs, placeholders)
-       ↓
-Finding Aggregator & Allowlist Filter (SHA-256 fingerprint matching against .sentinel.toml)
-       ↓
-Terminal Reporter / Versioned JSON Reporter
-```
+Sentinel addresses these issues with a single, standalone native binary that emphasizes speed, low false positives, and strict non-leakage security invariants.
 
 ---
 
 ## Architecture
 
-Sentinel is organized into modular Rust components within `src/`:
+Sentinel implements a modular, streaming pipeline built entirely on Rust standard library primitives and lightweight crates (`rayon`, `ignore`, `regex`, `sha2`, `serde`, `clap`):
 
-- **`cli`** (`src/cli.rs`): Defines the command-line interface using `clap` (derive), managing subcommands, arguments, and validation.
-- **`scanner`** (`src/scanner.rs`): Orchestrates directory traversal, file size filtering, binary preflight inspection, and parallel line execution via `rayon`.
-- **`detector`** (`src/detector.rs`): Defines the `Detector` trait and `DetectorRegistry` for registering and dispatching rules.
-- **`detectors/`** (`src/detectors/*`): Individual detector implementations:
-  - `aws.rs`: AWS Access Key IDs and secret keys in context.
-  - `github.rs`: GitHub PATs (classic & fine-grained), OAuth tokens, and app keys.
-  - `private_key.rs`: Cryptographic private key headers (RSA, OpenSSH, EC, etc.).
-  - `database.rs`: Database connection strings with embedded authentication.
-  - `jwt.rs`: JSON Web Tokens (3-part base64url).
-  - `generic.rs`: Bearer tokens, generic API keys, passwords, credentials, and high-entropy candidates.
-- **`models`** (`src/models.rs`): Data contracts for findings, severity levels, scan statistics, and report schemas.
-- **`config`** (`src/config.rs`): Parses `.sentinel.toml` configurations with fallback defaults.
-- **`ignore`** (`src/ignore.rs`): Implements default ignore rules and integrates custom glob overrides.
-- **`entropy`** (`src/entropy.rs`): Calculates Shannon entropy and contains false-positive filter logic.
-- **`fingerprint`** (`src/fingerprint.rs`): Computes SHA-256 hashes and redacted representations (`8a21••••91cf`).
-- **`reporter`** (`src/reporter.rs`): Formats human-readable console summaries and versioned JSON outputs.
+```
+                        Repository Root Path
+                                 │
+                                 ▼
+                     Target & Path Validation
+                     (Checks path existence; exit code 3 on error)
+                                 │
+                                 ▼
+                         Directory Traversal
+              (ignore::WalkBuilder - Gitignore-aware, hidden files,
+               symlink loop protection, default exclusion rules)
+                                 │
+                                 ▼
+                       File Discovery Pipeline
+         ┌────────────────────────────────────────────────────────┐
+         │ 1. Ignore Engine Filter                                │
+         │    (.gitignore + .sentinel.toml + CLI --ignore)        │
+         │                                                        │
+         │ 2. Metadata File Size Guard                            │
+         │    (Metadata check; skip files > max_file_size (5MB))  │
+         │                                                        │
+         │ 3. Binary Preflight Filter                             │
+         │    (Inspect initial 8KB: null bytes & control ratio)   │
+         │                                                        │
+         │ 4. Bounded Line-by-Line Streaming                      │
+         │    (Capped line reading at 64KB to prevent OOM)        │
+         └────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+                     Parallel Detector Dispatch
+            (Rayon threadpool evaluating Send + Sync Detectors)
+         ┌────────────────────────────────────────────────────────┐
+         │ • AWS Access Keys & Context-Bound Secrets              │
+         │ • GitHub Tokens (Classic, Fine-Grained, OAuth, Apps)   │
+         │ • Private Key Headers (RSA, EC, DSA, OpenSSH, PKCS#8)  │
+         │ • Database Connection Strings (Postgres, MySQL, etc.)  │
+         │ • JWT Structure Validation (3-part base64url ey...)    │
+         │ • Bearer Authentication Tokens                         │
+         │ • Generic API Keys, Passwords & Credentials            │
+         │ • High-Entropy Candidate Engine                        │
+         └────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+                Context & False-Positive Filter
+         (Filters UUIDs, SHA-1/256 hashes, SRI digests,
+          package lockfiles, templates, dummy tokens, placeholders)
+                                 │
+                                 ▼
+                    Deduplication & Allowlists
+         (Deduplicates overlapping detector matches per line;
+          filters SHA-256 fingerprints in .sentinel.toml allowlist)
+                                 │
+                                 ▼
+                       Reporting & Exit Codes
+             ┌─────────────────────────┬─────────────────────────┐
+             │    Terminal Reporter    │     JSON Reporter       │
+             │ (Safe masked fingerprints│ (Versioned schema v1,   │
+             │  8a21••••91cf, ANSI/    │  full deterministic     │
+             │  NO_COLOR support)      │  SHA-256, machine-safe) │
+             └─────────────────────────┴─────────────────────────┘
+                                 │
+                                 ▼
+                      Deterministic Exit Code
+           (0 = clean, 1 = findings, 2 = config error, 3 = runtime)
+```
 
 ---
 
 ## Detection Engine
 
-Regex alone is insufficient for reliable credential detection. Pure regex produces excessive false alarms on identifiers, test mocks, and UUIDs, or misses credentials with novel prefixes.
+Sentinel employs a layered detection model combining regex patterns, variable assignment context, structural validation, and Shannon entropy analysis:
 
-Sentinel uses a four-layer detection strategy:
-
-1. **Pattern Matching**: Target regexes locate known credential structures (e.g., `AKIA...`, `ghp_...`, `-----BEGIN...`).
-2. **Context Analysis**: Evaluates surrounding variable assignments and keywords (e.g., `api_key =`, `password =`, `db_pass =`).
-3. **Entropy Validation**: Measures character randomness using Shannon entropy ($H(X) = -\sum P(x_i) \log_2 P(x_i)$). High-entropy detectors ensure unclassified candidates possess sufficient unpredictability to warrant inspection.
-4. **False-Positive Suppression**: Proactively removes standard UUIDs, 40-character Git commit SHAs, documentation samples, and common placeholder strings (`YOUR_API_KEY_HERE`, `CHANGE_ME`, `test_secret`).
+| Detector ID | Category | Default Severity | Target Signatures & Validation Rules |
+|:---|:---|:---|:---|
+| `aws_access_key` | Cloud Credentials | `HIGH` | AWS Access Key IDs (`AKIA`, `ABIA`, `ACCA`, `ASIA` [20 chars]) and context-bound secret keys (40-char base64). |
+| `github_token` | Source Control | `HIGH` | GitHub Personal Access Tokens (classic `ghp_`, fine-grained `github_pat_`, OAuth `gho_`, user/server tokens `ghu_`/`ghs_`, refresh `ghr_`). |
+| `private_key` | Cryptographic Material | `CRITICAL` | PEM header blocks: RSA, DSA, EC, OPENSSH, PGP, ENCRYPTED, and generic PKCS#8 (`BEGIN ... PRIVATE KEY`). |
+| `database_connection_string` | Database Credentials | `HIGH` | URIs with embedded passwords for PostgreSQL, MySQL, MongoDB, Redis, AMQP, MSSQL (`scheme://[user]:password@host`). Excludes credential-free URIs. |
+| `jwt_token` | Authentication Tokens | `MEDIUM` | Strict three-part dot-separated base64url tokens starting with `ey` in header and payload. Rejects version strings and documentation samples. |
+| `bearer_token` | Authentication Tokens | `HIGH` | `Authorization: Bearer <token>` HTTP headers and bearer variable assignments with verified entropy. |
+| `generic_api_key` | API Keys | `MEDIUM` | Assignment identifiers (`api_key`, `apikey`, `secret_key`, etc.) with high-entropy token strings. |
+| `password_assignment` | Credentials | `MEDIUM` | Explicit password assignments (`password = "..."`, `db_pass = "..."`) excluding templates and placeholders. |
+| `generic_credential` | Credentials | `MEDIUM` | Generic credential keys (`client_secret`, `auth_token`, `access_token`) with entropy verification. |
+| `high_entropy_candidate` | Entropy Analysis | `LOW` | Unclassified candidate strings exceeding Shannon entropy threshold (default $H \ge 4.0$) inside credential-relevant contexts. |
 
 ---
 
-## Supported Detectors
+## Security Model
 
-| Detector ID | Category | Default Severity | Description |
-|:---|:---|:---|:---|
-| `aws_access_key` | Cloud Credentials | `HIGH` | Detects AWS Access Key IDs (`AKIA`, `ABIA`, `ACCA`, `ASIA`) and context-bound secret keys |
-| `github_token` | Source Control | `HIGH` | Detects GitHub Personal Access Tokens (classic `ghp_`, fine-grained `github_pat_`, OAuth `gho_`, app `ghs_`/`ghu_`) |
-| `private_key` | Cryptographic Material | `CRITICAL` | Detects RSA, DSA, EC, OpenSSH, and PKCS#8 private key header blocks without exposing key data |
-| `database_connection_string` | Database Credentials | `HIGH` | Detects connection URIs (`postgres://`, `mysql://`, `mongodb://`, `redis://`, etc.) containing passwords |
-| `jwt_token` | Authentication Tokens | `MEDIUM` | Detects standard three-part base64url encoded JSON Web Tokens |
-| `bearer_token` | Authentication Tokens | `HIGH` | Detects HTTP `Bearer <token>` authentication headers and config tokens |
-| `generic_api_key` | API Keys | `MEDIUM` | Detects variable assignments matching common API key naming conventions with verified entropy |
-| `password_assignment` | Credentials | `MEDIUM` | Detects hardcoded password variable assignments in source code and configuration files |
-| `generic_credential` | Credentials | `MEDIUM` | Detects assignments to generic credential variables (e.g., `client_secret`, `auth_token`) |
-| `high_entropy_candidate` | Entropy Analysis | `LOW` | Detects unclassified strings exceeding Shannon entropy thresholds inside credential-relevant contexts |
+Sentinel operates under strict, transparent security invariants:
+
+1. **Local-First & Offline**: Sentinel never initiates outbound network connections, requires no external API keys, performs no repository uploads, and contains no telemetry or usage tracking.
+2. **No Raw Secret Persistence**: Raw detected secret strings are **never** stored in `Finding` structs, never stored in `ScanReport`, never serialized into JSON, never printed in terminal output, and never written to logs or error messages.
+3. **Deterministic Cryptographic Fingerprints**: Upon detection, every candidate secret is immediately hashed with SHA-256 (`hex(sha256(secret))`). This full 64-character hash serves as the sole machine-safe identifier for allowlisting and programmatic correlation.
+4. **Terminal Redaction**: Terminal reports only display safely masked fingerprints (`8a21••••91cf`), ensuring screen shares, shoulder surfing, and terminal logs never expose sensitive data.
+5. **Memory Invariants**: While raw secret substrings temporarily reside in process memory during file line inspection and hashing, they are strictly ephemeral and dropped immediately after hashing and context filtering. They are never retained in persistent data structures.
+
+---
+
+## False Positive Strategy
+
+Security scanners that produce excessive false alarms train developers to ignore warnings. Sentinel implements an aggressive, multi-layered false-positive suppression system:
+
+- **Structural Hashes & Digests**:
+  - Standard UUIDs (`[0-9a-f]{8}-[0-9a-f]{4}-...`)
+  - Git commit SHA-1 hashes (40-character hex)
+  - Standalone SHA-256 hashes (64-character hex)
+  - Docker image digests (`sha256:[a-f0-9]{64}`)
+  - Subresource Integrity (SRI) and package lockfile hashes (`sha256-...`, `sha384-...`, `sha512-...`)
+- **Template Variables & Interpolation**:
+  - Shell and template expressions (`${VAR}`, `$VAR`, `<YOUR_KEY>`, `{{API_KEY}}`, `%VAR%`)
+  - Environment lookups (`process.env.`, `os.environ[`)
+- **Placeholders & Documentation Examples**:
+  - Standard documentation placeholders (`YOUR_API_KEY`, `YOUR_KEY_HERE`, `CHANGE_ME`, `REPLACE_ME`, `EXAMPLE_TOKEN`, `dummy_secret`)
+  - Trivially fake credentials (`admin/admin`, `test/test`, `password123`, `root/root`, `example/example`)
+- **Monotonic & Repetitive Strings**:
+  - Repeated character sequences (`AAAA...`, `1111...`, `12345678...`)
+  - Low-entropy candidates ($H < 3.0$) are rejected.
+- **Line Deduplication**:
+  - When multiple detectors match the same secret on the same line (e.g. `generic_credential` and `high_entropy_candidate`), Sentinel deterministically deduplicates findings, keeping only the highest-severity and highest-confidence finding.
 
 ---
 
 ## Installation
 
-### Building from Source
+### Prerequisites
 
-Ensure a stable Rust toolchain is installed ([rustup.rs](https://rustup.rs/)):
+Ensure you have a stable Rust toolchain installed (version 1.75+ recommended):
 
 ```bash
-# Clone the repository
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### Build and Install from Source
+
+```bash
 git clone https://github.com/buildwith-zxid/sentinel.git
 cd sentinel
-
-# Build and install locally via Cargo
 cargo install --path .
 ```
 
@@ -156,65 +180,62 @@ Verify installation:
 sentinel version
 ```
 
-### Future Distribution
+### Release Binary Build
 
-Sentinel is engineered to compile down to a standalone static native executable. Binary releases for Linux, macOS, and Windows can be produced using `cargo build --release` without requiring any external runtimes on client machines.
+To build an optimized standalone native binary without installing to `cargo/bin`:
+
+```bash
+cargo build --release
+# Executable located at ./target/release/sentinel (or sentinel.exe on Windows)
+```
 
 ---
 
 ## Usage
 
-### Basic Scan
-
-Scan the current repository:
+### Scan Current Directory
 
 ```bash
 sentinel scan .
 ```
 
-Scan an explicit directory path:
+### Scan Specific Path
 
 ```bash
-sentinel scan ./my-project
+sentinel scan /path/to/repository
 ```
 
-### JSON Output
-
-Generate versioned, machine-readable JSON (ideal for CI pipelines, automated tooling, or security dashboards):
+### Machine-Readable JSON Mode
 
 ```bash
 sentinel scan . --json
 ```
 
-### Severity Filtering
+### Filter by Minimum Severity
 
-Filter findings by minimum severity (`low`, `medium`, `high`, `critical`):
+Levels: `low`, `medium`, `high`, `critical`
 
 ```bash
 sentinel scan . --severity high
 ```
 
-### Custom Ignore Patterns
-
-Exclude specific paths or globs from the scan:
+### Exclude Custom Paths or Patterns
 
 ```bash
 sentinel scan . --ignore "fixtures/**" --ignore "*.generated.ts"
 ```
 
-### Color Control
+### Plain-Text / CI Terminal Output
 
-Disable colored ANSI output for plain-text logs or CI environments:
+Disable ANSI colors via flag or standard environment variable:
 
 ```bash
 sentinel scan . --no-color
+# or
+NO_COLOR=1 sentinel scan .
 ```
 
-*(Note: Sentinel also respects the standard `NO_COLOR` environment variable).*
-
-### Inspect Detector Rules
-
-List all active detector rules, categories, and default severities:
+### Inspect Active Detector Rules
 
 ```bash
 sentinel rules
@@ -222,7 +243,7 @@ sentinel rules
 
 ---
 
-## Example Output
+## Output Examples
 
 ### Terminal Output
 
@@ -230,11 +251,11 @@ sentinel rules
 SENTINEL SECURITY SCAN
 ────────────────────────────────────
 
-Repository: ./backend-service
+Repository: ./services/payment-gateway
 
-Files scanned       184
-Files skipped        37
-Scan duration       42ms
+Files scanned       142
+Files skipped        28
+Scan duration       34ms
 
 Findings             2
 
@@ -243,26 +264,26 @@ HIGH
   config/settings.rs:18
   fingerprint: 8a21••••91cf
 
-MEDIUM
-  Generic API Key
-  src/client.rs:42
-  fingerprint: c731••••82aa
+CRITICAL
+  Private Key Block
+  certs/server.pem:1
+  fingerprint: f4e8••••3b12
 
 ────────────────────────────────────
 ✖ 2 potential secret(s) detected
 ```
 
-### Machine-Readable JSON Output (`--json`)
+### JSON Output (`--json`)
 
 ```json
 {
   "schema_version": 1,
   "sentinel_version": "0.1.0",
-  "path": "./backend-service",
+  "path": "./services/payment-gateway",
   "stats": {
-    "files_scanned": 184,
-    "files_skipped": 37,
-    "duration_ms": 42
+    "files_scanned": 142,
+    "files_skipped": 28,
+    "duration_ms": 34
   },
   "findings": [
     {
@@ -274,6 +295,16 @@ MEDIUM
       "column": 12,
       "fingerprint": "8a21c43f9a72d3e18502f61e7b99c018a1a3b8d9e2f4c5b6a7d8e9f0123491cf",
       "confidence": 0.98
+    },
+    {
+      "detector": "private_key",
+      "category": "Cryptographic Material",
+      "severity": "CRITICAL",
+      "file": "certs/server.pem",
+      "line": 1,
+      "column": 1,
+      "fingerprint": "f4e8b192809d43ec8b251284a7e91122a6136d89551c098df241ba9256903b12",
+      "confidence": 1.0
     }
   ]
 }
@@ -283,30 +314,41 @@ MEDIUM
 
 ## Configuration
 
-Sentinel can be configured using a `.sentinel.toml` file in the target directory or specified via `--config <path>`.
+Sentinel reads configuration from `.sentinel.toml` located in the scan target directory (or specified via `--config <path>`).
+
+### Configuration Precedence
+
+1. **CLI Flags** (e.g. `--severity`, `--ignore`, `--no-color`)
+2. **`.sentinel.toml`** configuration file
+3. **Built-in Defaults**
+
+If a `.sentinel.toml` file exists but contains syntax or validation errors, Sentinel exits immediately with exit code `2`.
+
+### Example `.sentinel.toml`
 
 ```toml
 [scan]
 # Maximum file size in bytes to scan (default: 5MB = 5242880)
 max_file_size = 5242880
 
-# Whether to follow filesystem symlinks during scan (default: false)
+# Follow filesystem symlinks (default: false to prevent loops/escapes)
 follow_symlinks = false
 
-# Worker threads for scanning (0 = auto-detect based on CPU cores)
+# Worker thread count (0 = auto-detect based on logical CPU cores)
 workers = 0
 
 [ignore]
-# Glob patterns to ignore in addition to .gitignore and default ignore lists
+# Glob patterns to ignore in addition to .gitignore and built-in rules
 patterns = [
     "node_modules/**",
     "target/**",
-    "tests/fixtures/**",
-    "**/*.min.js"
+    "dist/**",
+    "**/*.min.js",
+    "tests/fixtures/**"
 ]
 
 [allowlist]
-# SHA-256 fingerprints of verified non-secrets to suppress from reports
+# Full 64-character SHA-256 fingerprints of verified non-secrets
 fingerprints = [
     "8a21c43f9a72d3e18502f61e7b99c018a1a3b8d9e2f4c5b6a7d8e9f0123491cf"
 ]
@@ -318,100 +360,86 @@ minimum = 4.0
 
 ---
 
-## Ignore Rules
-
-Sentinel skips files through three distinct mechanisms:
-
-1. **Default Exclusions**: Standard build and version-control artifacts (`.git`, `node_modules`, `target`, `dist`, `build`, `.venv`, `venv`, `__pycache__`) are automatically skipped.
-2. **Gitignore Rules**: Respects `.gitignore` and parent ignore configurations encountered during traversal.
-3. **Custom Glob Patterns**: Additional patterns supplied in `.sentinel.toml` under `[ignore].patterns` or passed via `--ignore <PATTERN>` flags on the CLI.
-
----
-
 ## Exit Codes
 
-Sentinel returns deterministic process exit codes suitable for scripting and CI gates:
+Sentinel produces deterministic, standard exit codes:
 
 | Exit Code | Meaning | Description |
 |:---:|:---|:---|
-| `0` | Clean | Scan completed successfully with zero findings (or all matches were allowlisted/filtered) |
-| `1` | Secrets Detected | One or more active findings were identified |
-| `2` | Configuration Error | Invalid command-line arguments or malformed configuration file |
-| `3` | Runtime Error | Unrecoverable filesystem or I/O error during scanning |
-
----
-
-## Security & Privacy
-
-- **Strictly Local-First**: Sentinel does not connect to the internet, performs no telemetry, and does not transmit repository code.
-- **Redaction by Design**: Raw matched credentials are never saved to finding records, reports, or stdout. Findings store only a SHA-256 digest, and terminal output displays a masked representation (`8a21••••91cf`).
-- **Safe Test Fixtures**: All repository test fixtures contain strictly synthetic, non-functional credentials.
-
----
-
-## False Positives
-
-Heuristic secret detection balances precision and recall. Sentinel manages false positives through:
-
-- **Format Suppression**: Automatic suppression of standard UUIDs, 40-character Git commit SHAs, and monotonic sequences.
-- **Placeholder Filtering**: Rejection of common template values (e.g., `your_api_key`, `CHANGE_ME`, `sample_token`, `xxxxxxxx`).
-- **Fingerprint Allowlists**: When an audited finding is verified as a non-secret, adding its full SHA-256 fingerprint to `[allowlist].fingerprints` in `.sentinel.toml` permanently suppresses it from future reports.
+| `0` | **Clean** | Scan completed successfully with zero unsuppressed findings. |
+| `1` | **Findings Detected** | One or more active secrets were detected. |
+| `2` | **Configuration / Argument Error** | Invalid CLI options, unknown flags, or malformed `.sentinel.toml`. |
+| `3` | **Runtime / I/O Error** | Nonexistent scan path, permission denied, or fatal traversal failure. |
 
 ---
 
 ## Performance
 
-Sentinel is built for maximum throughput with minimal CPU and memory overhead:
+Sentinel is engineered for high throughput and bounded memory usage:
+- **Filesystem Traversal**: Leverages the multi-threaded, `.gitignore`-aware `ignore` crate.
+- **Parallel Scanning**: Uses `rayon` work-stealing parallelism across available CPU cores.
+- **Memory Guards**: Skips files exceeding `max_file_size` via metadata before reading contents.
+- **Bounded Buffer Inspection**: Lines are read with a 64KB bounded reader to protect against memory exhaustion on minified single-line assets.
+- **Binary Preflight**: Content inspection is restricted to the first 8KB.
 
-- **Fast Traversal**: Uses `ignore` for fast, Gitignore-aware recursive directory traversal.
-- **Parallel Scanning**: Dispatches file scanning concurrently across CPU cores using `rayon`.
-- **Pre-allocation & Memory Guards**: Files larger than `max_file_size` are skipped via metadata inspection prior to allocation. Binary files are detected and skipped in the initial 8KB.
-- **Zero Heavy Runtimes**: Minimal memory footprint compiled directly to machine code.
+### Measured Microbenchmarks (Criterion on Rust Stable)
 
-### Measured Benchmarks (Criterion on Rust Stable)
+*Measured on x86_64 Windows (AMD Ryzen, 100 samples per test via Criterion):*
 
-Microbenchmarks measured on AMD Ryzen / x86_64 Windows (100 samples per test via Criterion):
-
-| Benchmark Target | Operation | Measured Median Latency | Throughput / Rate |
+| Benchmark Scope | Operation | Latency (Median) | Rate |
 |:---|:---|:---:|:---:|
-| `shannon_entropy_sample` | 20-char candidate entropy calculation | ~2.39 µs | ~418,000 evaluations / sec / core |
-| `shannon_entropy_high` | 60-char candidate entropy calculation | ~3.34 µs | ~299,000 evaluations / sec / core |
-| `detector_scan_clean_line` | All 10 modular detectors evaluated on clean line | ~4.34 µs | ~230,000 lines / sec / core |
-| `detector_scan_secret_line` | Full pipeline on secret line (regex, context, entropy, SHA-256) | ~19.63 µs | ~51,000 lines / sec / core |
+| **Candidate Entropy** | Shannon entropy (20-char candidate) | ~2.39 µs | ~418,000 evaluations / sec / core |
+| **Candidate Entropy** | Shannon entropy (60-char candidate) | ~3.34 µs | ~299,000 evaluations / sec / core |
+| **Clean Line Inspection** | All 10 modular detectors on clean code line | ~4.34 µs | ~230,000 lines / sec / core |
+| **Secret Line Inspection** | Full pipeline on secret match (regex, entropy, context, SHA-256) | ~19.63 µs | ~51,000 lines / sec / core |
+
+*Note: Line evaluation throughput measures raw detector engine speed. Full repository scan throughput also incorporates filesystem I/O, directory traversal, gitignore matching, and OS scheduling.*
 
 ---
 
 ## Testing
 
-Sentinel maintains a comprehensive automated test suite:
-
-- **Unit Tests**: Verify entropy calculation, false positive suppression, SHA-256 fingerprinting, configuration parsing, and detector logic.
-- **Integration Tests**: Verify end-to-end repository scanning against realistic fixtures, exit codes, binary detection, allowlist suppression, and strict credential non-leakage.
-- **Redaction Verification**: Automated test suites assert that zero raw fixture credentials appear in report outputs.
-
-Run the test suite:
+Sentinel includes a comprehensive test matrix spanning unit tests, integration tests, security invariant checks, and regression suites:
 
 ```bash
+# Run all unit, integration, and security tests
 cargo test --all-targets
+
+# Run linters and format check
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+
+# Build benchmarks without running
+cargo bench --no-run
 ```
+
+### Security Tests
+
+The test suite explicitly asserts:
+- Raw detected credentials never appear in standard output.
+- Raw detected credentials never appear in error streams (stderr).
+- Raw detected credentials never appear in JSON serialization.
+- Fingerprints are strictly deterministic across runs.
+- Deduplication retains highest severity finding when multiple detectors match the same line.
 
 ---
 
 ## Limitations
 
-- **Heuristic Boundaries**: Detection is based on patterns, entropy, and context. Novel or non-standard token formats may not match existing rules.
-- **Obfuscated Credentials**: Base64-nested or programmatically assembled strings across multiple lines or concatenations cannot be guaranteed detection.
-- **Trade-offs in Entropy**: Extremely short high-entropy strings (<16 characters) cannot be safely flagged without inducing false positive noise.
+- **Pattern-Based Detection**: Pattern matching and Shannon entropy cannot guarantee detection of every novel, custom, or encrypted credential format.
+- **Obfuscated Secrets**: Split-string concatenation, base64-nested tokens, or dynamically reconstructed strings at runtime are beyond the scope of static source inspection.
+- **Short High-Entropy Strings**: Strings under 16 characters cannot be reliably detected via entropy analysis alone without inducing unacceptable false positive rates.
+- **Single-Line Inspection**: Detectors currently operate on individual lines; multi-line secrets that do not use identifiable header/footer blocks (like PEM keys) may not be fully detected.
 
 ---
 
 ## Roadmap
 
-- [ ] Git pre-commit hook integration helper (`sentinel install-hook`)
-- [ ] SARIF (Static Analysis Results Interchange Format) output support for GitHub Code Scanning
-- [ ] Baseline snapshot management (`sentinel baseline record / check`)
-- [ ] Additional specialized detectors (e.g., Slack Webhooks, Stripe Keys, GitLab Tokens)
-- [ ] Custom regex rule definitions via `.sentinel.toml`
+- [ ] Interactive pre-commit hook installer (`sentinel init-hook`)
+- [ ] SARIF (Static Analysis Results Interchange Format) output for GitHub Code Scanning
+- [ ] Baseline snapshot file support (`sentinel baseline record / check`)
+- [ ] Additional detectors for specialized cloud providers (Stripe, Slack, GitLab, HashiCorp Vault)
+- [ ] Custom user-defined regex rules via `.sentinel.toml`
 
 ---
 
@@ -455,9 +483,15 @@ sentinel/
 │   │   ├── fake_github.sh
 │   │   ├── fake_jwt.js
 │   │   ├── fake_private_key.pem
+│   │   ├── safe_docker.yaml
 │   │   ├── safe_docs.md
+│   │   ├── safe_integrity.html
+│   │   ├── safe_lockfile.json
 │   │   ├── safe_placeholders.yaml
 │   │   ├── safe_sha.txt
+│   │   ├── safe_sha256.txt
+│   │   ├── safe_sourcemap.js
+│   │   ├── safe_templates.env
 │   │   └── safe_uuid.json
 │   └── integration.rs
 ├── .gitignore
@@ -467,17 +501,6 @@ sentinel/
 ├── LICENSE
 └── README.md
 ```
-
----
-
-## Contributing
-
-Contributions are welcome. Please ensure that:
-
-1. Code is formatted: `cargo fmt --check`
-2. Clippy is satisfied: `cargo clippy --all-targets -- -D warnings`
-3. All tests pass: `cargo test --all-targets`
-4. No real secrets or credentials are ever committed to the repository or test fixtures.
 
 ---
 

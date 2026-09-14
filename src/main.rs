@@ -33,7 +33,13 @@ fn handle_scan(args: ScanArgs) {
                 process::exit(EXIT_INVALID_CONFIG);
             }
         },
-        None => Config::find_or_default(&args.path),
+        None => match Config::find_or_default(&args.path) {
+            Ok(res) => res,
+            Err(err) => {
+                eprintln!("Configuration Error: {}", err);
+                process::exit(EXIT_INVALID_CONFIG);
+            }
+        },
     };
 
     // 2. Append CLI ignore patterns

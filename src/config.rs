@@ -78,12 +78,28 @@ impl Config {
         let path = path.as_ref();
         let content = fs::read_to_string(path)
             .map_err(|e| format!("Failed to read config file '{}': {}", path.display(), e))?;
-        toml::from_str(&content)
-            .map_err(|e| format!("Invalid TOML syntax in '{}': {}", path.display(), e))
+        let mut config: Config = toml::from_str(&content)
+            .map_err(|e| format!("Invalid TOML syntax in '{}': {}", path.display(), e))?;
+        config.normalize();
+        Ok(config)
+    }
+
+    /// Normalize and deduplicate configuration values.
+    pub fn normalize(&mut self) {
+        // Deduplicate allowlisted fingerprints
+        self.allowlist.fingerprints.sort();
+        self.allowlist.fingerprints.dedup();
+
+        // Enforce valid entropy minimum
+        if self.entropy.minimum.is_nan() || self.entropy.minimum < 0.0 {
+            self.entropy.minimum = DEFAULT_MIN_ENTROPY;
+        }
     }
 
     /// Automatically find and load `.sentinel.toml` in `dir` or default if not found.
-    pub fn find_or_default(target_path: &Path) -> (Self, Option<PathBuf>) {
+    ///
+    /// Returns an error if `.sentinel.toml` exists but contains invalid TOML syntax.
+    pub fn find_or_default(target_path: &Path) -> Result<(Self, Option<PathBuf>), String> {
         let candidate = if target_path.is_dir() {
             target_path.join(CONFIG_FILE_NAME)
         } else if let Some(parent) = target_path.parent() {
@@ -93,15 +109,10 @@ impl Config {
         };
 
         if candidate.exists() && candidate.is_file() {
-            match Self::from_file(&candidate) {
-                Ok(cfg) => (cfg, Some(candidate)),
-                Err(err) => {
-                    eprintln!("Warning: could not parse {}: {}", candidate.display(), err);
-                    (Self::default(), None)
-                }
-            }
+            let cfg = Self::from_file(&candidate)?;
+            Ok((cfg, Some(candidate)))
         } else {
-            (Self::default(), None)
+            Ok((Self::default(), None))
         }
     }
 }

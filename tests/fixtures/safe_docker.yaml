@@ -1,0 +1,7 @@
+# Docker Compose with pinned image digests
+version: "3.8"
+services:
+  app:
+    image: node@sha256:7173b809ca12ec5dee4506cd86be934c4596dd234ee82c0662eac04a8c2c71dc
+  redis:
+    image: redis@sha256:4f2081a97d39ca253c39dae691475c404cf9ea861a49ab50c53a6b3adfa79a1f

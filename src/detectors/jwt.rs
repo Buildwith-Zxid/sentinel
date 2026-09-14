@@ -60,7 +60,7 @@ impl Detector for JwtTokenDetector {
         for cap in self.jwt_regex.captures_iter(line) {
             if let Some(m) = cap.get(1) {
                 let token_str = m.as_str();
-                if is_likely_false_positive(token_str) {
+                if is_likely_false_positive(token_str) || !is_valid_jwt_structure(token_str) {
                     continue;
                 }
 
@@ -82,6 +82,34 @@ impl Detector for JwtTokenDetector {
     }
 }
 
+/// Strictly validates 3-part base64url JWT structure with standard header and payload prefixes.
+fn is_valid_jwt_structure(token: &str) -> bool {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    // Both header and payload in valid JWTs are base64url encoded JSON objects starting with '{"', which encodes to 'ey'
+    if !parts[0].starts_with("ey") || parts[0].len() < 8 {
+        return false;
+    }
+    if !parts[1].starts_with("ey") || parts[1].len() < 8 {
+        return false;
+    }
+    if parts[2].len() < 8 {
+        return false;
+    }
+    // Characters must strictly belong to base64url character set
+    for part in parts {
+        if !part
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return false;
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +122,16 @@ mod tests {
         let findings = detector.scan_line(&line, 1, Path::new("auth.js"), &Config::default());
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::Medium);
+    }
+
+    #[test]
+    fn test_arbitrary_dotted_string_rejected() {
+        let detector = JwtTokenDetector::new();
+        let line = "import module from 'com.example.enterprise.service.v1.0.0';";
+        let findings = detector.scan_line(line, 1, Path::new("app.js"), &Config::default());
+        assert!(
+            findings.is_empty(),
+            "Dotted package identifiers must not trigger JWT detector"
+        );
     }
 }
