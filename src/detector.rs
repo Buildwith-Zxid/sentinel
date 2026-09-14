@@ -71,7 +71,7 @@ impl DetectorRegistry {
         Self { detectors }
     }
 
-    /// Return metadata for all registered detector rules (used by `sentinel rules`).
+    /// Return metadata for all registered detector rules (used by `leakguard rules`).
     pub fn rules(&self) -> Vec<DetectorRuleInfo> {
         self.detectors
             .iter()

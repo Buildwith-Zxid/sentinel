@@ -1,166 +1,145 @@
-# Sentinel
+# LeakGuard
 
-A fast, local-first security CLI for detecting accidentally exposed secrets and credentials in source code repositories.
+> Native Rust secret and credential scanner for source repositories.
 
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
 
-## What It Does
+## Overview
 
-Sentinel is an independent command-line security tool written in 100% native Rust. It recursively inspects source-code repositories to identify unencrypted secrets—such as cloud access keys, authentication tokens, private key blocks, database connection strings, and high-entropy credentials—before they are committed or pushed to remote repositories.
+LeakGuard is a Rust-only, local-first security CLI that detects accidentally exposed secrets and credentials in source repositories without uploading repository contents or requiring an external runtime.
 
-Sentinel operates strictly offline. It never executes network calls, collects no telemetry, and immediately digests any detected credential into a deterministic SHA-256 fingerprint. Raw secret values are never saved in finding objects, serialized in reports, or printed to terminal or JSON streams.
+LeakGuard scans source repositories locally for accidentally exposed credentials and secret-like values. It is designed around deterministic detection, bounded file processing, false-positive filtering, safe reporting, and zero repository uploads.
 
----
+### Why LeakGuard?
 
-## Why It Exists
+Accidental credential exposure in source control is a frequent vulnerability in software engineering. Developers frequently hardcode tokens during debugging, embed credentials in local configuration files, or inadvertently commit `.env` files.
 
-Accidental credential exposure in source repositories remains one of the primary attack vectors in software development. Developers often temporarily hardcode tokens during testing, leave credentials in local configuration files, or inadvertently check in `.env` files.
+Existing scanners often introduce significant operational trade-offs:
+- Requiring runtime dependencies such as Python, Node.js, or Docker containers.
+- Emitting excessive false alarms on UUIDs, commit SHAs, lockfile integrity hashes, and template placeholders.
+- Leaking credentials by printing raw matched text verbatim into console streams, CI logs, or error messages.
+- Lacking deterministic exit codes or structured, machine-safe JSON schemas.
 
-Existing scanners frequently introduce significant drawbacks:
-- They require runtime dependencies like Python, Node.js, or Docker containers.
-- They generate excessive false positives on UUIDs, commit SHAs, content hashes, and documentation samples.
-- Some tools inadvertently leak credentials by printing matched text verbatim in console output or unredacted log lines.
-- Many tools lack deterministic exit codes and machine-readable output suitable for CI/CD pipelines.
-
-Sentinel addresses these issues with a single, standalone native binary that emphasizes speed, low false positives, and strict non-leakage security invariants.
+LeakGuard provides a single, self-contained native executable that prioritizes scanning speed, low false positive rates, bounded memory consumption, and strict non-leakage security guarantees.
 
 ---
 
 ## Architecture
 
-Sentinel implements a modular, streaming pipeline built entirely on Rust standard library primitives and lightweight crates (`rayon`, `ignore`, `regex`, `sha2`, `serde`, `clap`):
+LeakGuard executes an independent, deterministic multi-stage scanning pipeline:
 
 ```
-                        Repository Root Path
-                                 │
-                                 ▼
-                     Target & Path Validation
-                     (Checks path existence; exit code 3 on error)
-                                 │
-                                 ▼
-                         Directory Traversal
-              (ignore::WalkBuilder - Gitignore-aware, hidden files,
-               symlink loop protection, default exclusion rules)
-                                 │
-                                 ▼
-                       File Discovery Pipeline
-         ┌────────────────────────────────────────────────────────┐
-         │ 1. Ignore Engine Filter                                │
-         │    (.gitignore + .sentinel.toml + CLI --ignore)        │
-         │                                                        │
-         │ 2. Metadata File Size Guard                            │
-         │    (Metadata check; skip files > max_file_size (5MB))  │
-         │                                                        │
-         │ 3. Binary Preflight Filter                             │
-         │    (Inspect initial 8KB: null bytes & control ratio)   │
-         │                                                        │
-         │ 4. Bounded Line-by-Line Streaming                      │
-         │    (Capped line reading at 64KB to prevent OOM)        │
-         └────────────────────────────────────────────────────────┘
-                                 │
-                                 ▼
-                     Parallel Detector Dispatch
-            (Rayon threadpool evaluating Send + Sync Detectors)
-         ┌────────────────────────────────────────────────────────┐
-         │ • AWS Access Keys & Context-Bound Secrets              │
-         │ • GitHub Tokens (Classic, Fine-Grained, OAuth, Apps)   │
-         │ • Private Key Headers (RSA, EC, DSA, OpenSSH, PKCS#8)  │
-         │ • Database Connection Strings (Postgres, MySQL, etc.)  │
-         │ • JWT Structure Validation (3-part base64url ey...)    │
-         │ • Bearer Authentication Tokens                         │
-         │ • Generic API Keys, Passwords & Credentials            │
-         │ • High-Entropy Candidate Engine                        │
-         └────────────────────────────────────────────────────────┘
-                                 │
-                                 ▼
-                Context & False-Positive Filter
-         (Filters UUIDs, SHA-1/256 hashes, SRI digests,
-          package lockfiles, templates, dummy tokens, placeholders)
-                                 │
-                                 ▼
-                    Deduplication & Allowlists
-         (Deduplicates overlapping detector matches per line;
-          filters SHA-256 fingerprints in .sentinel.toml allowlist)
-                                 │
-                                 ▼
-                       Reporting & Exit Codes
-             ┌─────────────────────────┬─────────────────────────┐
-             │    Terminal Reporter    │     JSON Reporter       │
-             │ (Safe masked fingerprints│ (Versioned schema v1,   │
-             │  8a21••••91cf, ANSI/    │  full deterministic     │
-             │  NO_COLOR support)      │  SHA-256, machine-safe) │
-             └─────────────────────────┴─────────────────────────┘
-                                 │
-                                 ▼
-                      Deterministic Exit Code
-           (0 = clean, 1 = findings, 2 = config error, 3 = runtime)
+Repository Root
+      ↓
+File Discovery (ignore::WalkBuilder - Gitignore-aware, hidden files, loop protection)
+      ↓
+Ignore / Filtering (.gitignore + .leakguard.toml + CLI --ignore + default skips)
+      ↓
+File Size Check (Filesystem metadata preflight against max_file_size, default 5MB)
+      ↓
+Binary Preflight (Initial 8KB inspection: null-byte detection & control-byte ratio)
+      ↓
+Bounded Buffered Reader (Capped line reading at 64KB to prevent memory exhaustion)
+      ↓
+Detector Registry (Trait-based modular detectors executed concurrently via Rayon)
+      ↓
+Pattern / Context / Entropy Analysis (Regex matching, identifier context, Shannon entropy)
+      ↓
+False Positive Filtering (UUIDs, commit SHAs, SHA-256 hashes, SRI digests, templates)
+      ↓
+Detector Deduplication (Retains highest severity/confidence on identical line findings)
+      ↓
+SHA-256 Fingerprinting (Immediate cryptographic digest; zero raw secret persistence)
+      ↓
+Terminal / JSON Reporter (Redacted console output or versioned schema v1 JSON)
 ```
+
+### Pipeline Details
+
+1. **File Discovery**: Recursively traverses directories using the `ignore` crate, respecting `.gitignore` files, parent ignore rules, and symlink protection (symlinks are not followed by default).
+2. **Ignore / Filtering**: Skips built-in artifact directories (`.git`, `node_modules`, `target`, `dist`, `build`, `.venv`) and patterns declared in configuration or CLI flags.
+3. **File Size Check**: Queries filesystem metadata prior to reading file contents, skipping files exceeding the configured limit (default: 5MB).
+4. **Binary Preflight**: Evaluates the initial 8KB window for null bytes and excessive non-text control characters to skip compiled binaries and non-text media early.
+5. **Bounded Buffered Reader**: Reads files using an internal 64KB bounded line buffer (`MAX_INSPECTED_LINE_BYTES`), guarding against memory exhaustion from gigantic single-line files (such as minified JavaScript bundles).
+6. **Detector Registry**: Evaluates candidate lines concurrently across logical CPU cores using a thread-safe `rayon` worker pool.
+7. **Pattern / Context / Entropy Analysis**: Combines structural signatures, assignment variable identifiers (`api_key`, `password`), and Shannon entropy thresholds ($H \ge 4.0$).
+8. **False Positive Filtering**: Suppresses known non-secret patterns, digests, template syntax, and dummy credentials.
+9. **Detector Deduplication**: When multiple detectors flag the same secret on the same line (e.g. `generic_credential` and `high_entropy_candidate`), findings are sorted by severity and confidence descending, retaining only the highest-priority finding.
+10. **SHA-256 Fingerprinting**: Generates a deterministic SHA-256 digest of the match for machine-safe reporting and allowlisting.
+11. **Terminal / JSON Reporter**: Formats findings for console output with safe masked fingerprints (`8a21••••91cf`) or strict machine-readable JSON.
 
 ---
 
 ## Detection Engine
 
-Sentinel employs a layered detection model combining regex patterns, variable assignment context, structural validation, and Shannon entropy analysis:
+LeakGuard includes 10 built-in detector rules implemented as trait-based modules:
 
 | Detector ID | Category | Default Severity | Target Signatures & Validation Rules |
 |:---|:---|:---|:---|
-| `aws_access_key` | Cloud Credentials | `HIGH` | AWS Access Key IDs (`AKIA`, `ABIA`, `ACCA`, `ASIA` [20 chars]) and context-bound secret keys (40-char base64). |
-| `github_token` | Source Control | `HIGH` | GitHub Personal Access Tokens (classic `ghp_`, fine-grained `github_pat_`, OAuth `gho_`, user/server tokens `ghu_`/`ghs_`, refresh `ghr_`). |
+| `aws_access_key` | Cloud Credentials | `HIGH` | AWS Access Key IDs (`AKIA`, `ABIA`, `ACCA`, `ASIA` [20 characters]) and context-bound secret keys (40-char base64). |
+| `github_token` | Source Control | `HIGH` | GitHub Personal Access Tokens (classic `ghp_`, fine-grained `github_pat_`, OAuth `gho_`, user/server `ghu_`/`ghs_`, refresh `ghr_`). |
 | `private_key` | Cryptographic Material | `CRITICAL` | PEM header blocks: RSA, DSA, EC, OPENSSH, PGP, ENCRYPTED, and generic PKCS#8 (`BEGIN ... PRIVATE KEY`). |
-| `database_connection_string` | Database Credentials | `HIGH` | URIs with embedded passwords for PostgreSQL, MySQL, MongoDB, Redis, AMQP, MSSQL (`scheme://[user]:password@host`). Excludes credential-free URIs. |
-| `jwt_token` | Authentication Tokens | `MEDIUM` | Strict three-part dot-separated base64url tokens starting with `ey` in header and payload. Rejects version strings and documentation samples. |
-| `bearer_token` | Authentication Tokens | `HIGH` | `Authorization: Bearer <token>` HTTP headers and bearer variable assignments with verified entropy. |
-| `generic_api_key` | API Keys | `MEDIUM` | Assignment identifiers (`api_key`, `apikey`, `secret_key`, etc.) with high-entropy token strings. |
-| `password_assignment` | Credentials | `MEDIUM` | Explicit password assignments (`password = "..."`, `db_pass = "..."`) excluding templates and placeholders. |
-| `generic_credential` | Credentials | `MEDIUM` | Generic credential keys (`client_secret`, `auth_token`, `access_token`) with entropy verification. |
-| `high_entropy_candidate` | Entropy Analysis | `LOW` | Unclassified candidate strings exceeding Shannon entropy threshold (default $H \ge 4.0$) inside credential-relevant contexts. |
+| `database_connection_string` | Database Credentials | `HIGH` | Connection URIs containing embedded passwords for PostgreSQL, MySQL, MongoDB, Redis, AMQP, MSSQL (`scheme://[user]:password@host`). Excludes credential-free URIs. |
+| `jwt_token` | Authentication Tokens | `MEDIUM` | Strict three-part base64url tokens starting with standard `ey...` header and payload prefixes. Rejects dotted package paths and documentation samples. |
+| `bearer_token` | Authentication Tokens | `HIGH` | HTTP `Authorization: Bearer <token>` headers and bearer variable assignments with verified entropy. |
+| `generic_api_key` | API Keys | `MEDIUM` | Assignment identifiers (`api_key`, `apikey`, `secret_key`, etc.) paired with high-entropy token strings. |
+| `password_assignment` | Credentials | `MEDIUM` | Explicit password variable assignments (`password = "..."`, `db_pass = "..."`) excluding templates and placeholders. |
+| `generic_credential` | Credentials | `MEDIUM` | Assignments to generic credential identifiers (`client_secret`, `auth_token`, `access_token`) with entropy verification. |
+| `high_entropy_candidate` | Entropy Analysis | `LOW` | Unclassified candidate strings exceeding Shannon entropy thresholds ($H \ge 4.0$) inside credential-relevant contexts. |
 
 ---
 
 ## Security Model
 
-Sentinel operates under strict, transparent security invariants:
+LeakGuard adheres to explicit, privacy-preserving security invariants:
 
-1. **Local-First & Offline**: Sentinel never initiates outbound network connections, requires no external API keys, performs no repository uploads, and contains no telemetry or usage tracking.
-2. **No Raw Secret Persistence**: Raw detected secret strings are **never** stored in `Finding` structs, never stored in `ScanReport`, never serialized into JSON, never printed in terminal output, and never written to logs or error messages.
-3. **Deterministic Cryptographic Fingerprints**: Upon detection, every candidate secret is immediately hashed with SHA-256 (`hex(sha256(secret))`). This full 64-character hash serves as the sole machine-safe identifier for allowlisting and programmatic correlation.
-4. **Terminal Redaction**: Terminal reports only display safely masked fingerprints (`8a21••••91cf`), ensuring screen shares, shoulder surfing, and terminal logs never expose sensitive data.
-5. **Memory Invariants**: While raw secret substrings temporarily reside in process memory during file line inspection and hashing, they are strictly ephemeral and dropped immediately after hashing and context filtering. They are never retained in persistent data structures.
+### Local-First
+Repository contents remain strictly on the user's local machine. Scanning executes entirely offline.
+
+### No Telemetry
+LeakGuard contains no telemetry, tracking, phone-home mechanisms, or remote analytics. It never transmits repository metadata or source code.
+
+### No External Runtime
+LeakGuard compiles directly into a standalone native binary without dependencies on Python, Node.js, Docker, Java, or external runtime interpreters.
+
+### Secret Redaction
+Raw detected secret values are **never** persisted in `Finding` structs, never stored in `ScanReport`, never logged, never printed to `stdout` or `stderr`, and never serialized into JSON output.
+
+### Fingerprinting
+Upon detection, every candidate secret is immediately digested into a full 64-character SHA-256 hash (`hex(sha256(secret))`). Terminal reports only display safely masked fingerprints (`8a21••••91cf`), preventing shoulder surfing and credential leakage in CI console logs.
+
+*(Note: While raw secret substrings temporarily reside in process memory buffers during line inspection and hashing, they are strictly ephemeral and dropped immediately after hashing and context filtering. They are never retained in persistent data structures.)*
 
 ---
 
-## False Positive Strategy
+## False Positive Handling
 
-Security scanners that produce excessive false alarms train developers to ignore warnings. Sentinel implements an aggressive, multi-layered false-positive suppression system:
+Heuristic secret detection requires balancing recall against false alarms. LeakGuard implements a multi-layer suppression engine:
 
-- **Structural Hashes & Digests**:
-  - Standard UUIDs (`[0-9a-f]{8}-[0-9a-f]{4}-...`)
-  - Git commit SHA-1 hashes (40-character hex)
-  - Standalone SHA-256 hashes (64-character hex)
-  - Docker image digests (`sha256:[a-f0-9]{64}`)
-  - Subresource Integrity (SRI) and package lockfile hashes (`sha256-...`, `sha384-...`, `sha512-...`)
-- **Template Variables & Interpolation**:
-  - Shell and template expressions (`${VAR}`, `$VAR`, `<YOUR_KEY>`, `{{API_KEY}}`, `%VAR%`)
-  - Environment lookups (`process.env.`, `os.environ[`)
-- **Placeholders & Documentation Examples**:
-  - Standard documentation placeholders (`YOUR_API_KEY`, `YOUR_KEY_HERE`, `CHANGE_ME`, `REPLACE_ME`, `EXAMPLE_TOKEN`, `dummy_secret`)
-  - Trivially fake credentials (`admin/admin`, `test/test`, `password123`, `root/root`, `example/example`)
-- **Monotonic & Repetitive Strings**:
-  - Repeated character sequences (`AAAA...`, `1111...`, `12345678...`)
-  - Low-entropy candidates ($H < 3.0$) are rejected.
-- **Line Deduplication**:
-  - When multiple detectors match the same secret on the same line (e.g. `generic_credential` and `high_entropy_candidate`), Sentinel deterministically deduplicates findings, keeping only the highest-severity and highest-confidence finding.
+- **UUID Suppression**: Standard 36-character UUIDs (`[0-9a-f]{8}-[0-9a-f]{4}-...`) are recognized and filtered.
+- **Git Commit SHA Suppression**: 40-character hexadecimal commit hashes are suppressed.
+- **SHA-256 Suppression**: 64-character hexadecimal digests are recognized and suppressed.
+- **Docker Image Digest Suppression**: `sha256:[a-f0-9]{64}` image identifiers are suppressed.
+- **SRI & Package Hashes**: Subresource Integrity and lockfile digests prefixed with `sha256-`, `sha384-`, or `sha512-` are recognized and suppressed.
+- **Environment & Template Placeholders**: Expressions such as `${...}`, `$VAR`, `<YOUR_KEY>`, `{{API_KEY}}`, `%VAR%`, and `process.env.` are suppressed.
+- **Dummy & Example Credentials**: Common development placeholders (`YOUR_API_KEY`, `CHANGE_ME`, `admin/admin`, `test/test`, `password123`, `example/example`) are ignored.
+- **Context & Entropy Evaluation**: Candidates must appear in plausible variable or header contexts and exceed Shannon entropy thresholds ($H \ge 4.0$). Low-entropy and monotonic strings (`AAAA...`, `123456...`) are rejected.
+- **Detector Deduplication**: Overlapping detections on the same line sharing the same secret fingerprint are deduplicated deterministically.
+
+> **Important**: These mechanisms reduce false positives but cannot eliminate them completely.
 
 ---
 
 ## Installation
 
+Repository: [https://github.com/Buildwith-Zxid/leakguard](https://github.com/Buildwith-Zxid/leakguard)
+
 ### Prerequisites
 
-Ensure you have a stable Rust toolchain installed (version 1.75+ recommended):
+Ensure you have a stable Rust toolchain installed (Rust 1.75+ recommended):
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -169,86 +148,97 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ### Build and Install from Source
 
 ```bash
-git clone https://github.com/buildwith-zxid/sentinel.git
-cd sentinel
+git clone https://github.com/Buildwith-Zxid/leakguard.git
+cd leakguard
 cargo install --path .
 ```
 
 Verify installation:
 
 ```bash
-sentinel version
+leakguard version
 ```
 
-### Release Binary Build
+### Building Release Executable
 
-To build an optimized standalone native binary without installing to `cargo/bin`:
+To produce an optimized standalone binary without installing to Cargo's global bin:
 
 ```bash
 cargo build --release
-# Executable located at ./target/release/sentinel (or sentinel.exe on Windows)
 ```
+
+The resulting executable will be located at:
+- **Linux / macOS**: `target/release/leakguard`
+- **Windows**: `target/release/leakguard.exe`
 
 ---
 
 ## Usage
 
-### Scan Current Directory
+### Basic Scan
+
+Scan the current working directory:
 
 ```bash
-sentinel scan .
+leakguard scan .
 ```
 
-### Scan Specific Path
+Scan an explicit directory path:
 
 ```bash
-sentinel scan /path/to/repository
+leakguard scan /path/to/project
 ```
 
 ### Machine-Readable JSON Mode
 
+Generate versioned, machine-readable JSON for CI/CD pipelines and security audits:
+
 ```bash
-sentinel scan . --json
+leakguard scan . --json
 ```
 
 ### Filter by Minimum Severity
 
-Levels: `low`, `medium`, `high`, `critical`
+Filter findings by severity level (`low`, `medium`, `high`, `critical`):
 
 ```bash
-sentinel scan . --severity high
+leakguard scan . --severity high
 ```
 
-### Exclude Custom Paths or Patterns
+### Custom Ignore Patterns
+
+Exclude specific paths or globs from the scan:
 
 ```bash
-sentinel scan . --ignore "fixtures/**" --ignore "*.generated.ts"
+leakguard scan . --ignore "fixtures/**" --ignore "*.generated.ts"
 ```
 
 ### Plain-Text / CI Terminal Output
 
-Disable ANSI colors via flag or standard environment variable:
+Disable ANSI terminal colors via flag or standard environment variable:
 
 ```bash
-sentinel scan . --no-color
+leakguard scan . --no-color
 # or
-NO_COLOR=1 sentinel scan .
+NO_COLOR=1 leakguard scan .
 ```
 
 ### Inspect Active Detector Rules
 
+List all built-in detection rules, categories, and default severities:
+
 ```bash
-sentinel rules
+leakguard rules
 ```
 
 ---
 
-## Output Examples
+## Example Output
 
 ### Terminal Output
 
 ```text
-SENTINEL SECURITY SCAN
+LEAKGUARD SECURITY SCAN
 ────────────────────────────────────
 
 Repository: ./services/payment-gateway
@@ -265,7 +255,7 @@ HIGH
   fingerprint: 8a21••••91cf
 
 CRITICAL
-  Private Key Block
+  Private Key
   certs/server.pem:1
   fingerprint: f4e8••••3b12
 
@@ -273,12 +263,30 @@ CRITICAL
 ✖ 2 potential secret(s) detected
 ```
 
-### JSON Output (`--json`)
+### Clean Scan Terminal Output
+
+```text
+LEAKGUARD SECURITY SCAN
+────────────────────────────────────
+
+Repository: ./src
+
+Files scanned       89
+Files skipped        4
+Scan duration       18ms
+
+Findings             0
+
+────────────────────────────────────
+✔ No secrets detected
+```
+
+### Machine-Readable JSON Output (`--json`)
 
 ```json
 {
   "schema_version": 1,
-  "sentinel_version": "0.1.0",
+  "leakguard_version": "0.1.0",
   "path": "./services/payment-gateway",
   "stats": {
     "files_scanned": 142,
@@ -314,31 +322,33 @@ CRITICAL
 
 ## Configuration
 
-Sentinel reads configuration from `.sentinel.toml` located in the scan target directory (or specified via `--config <path>`).
+LeakGuard can be configured using a `.leakguard.toml` file in the scan target directory or specified via `--config <path>`.
+
+*(Note: For backward compatibility, `.sentinel.toml` is also supported if `.leakguard.toml` is not present).*
 
 ### Configuration Precedence
 
-1. **CLI Flags** (e.g. `--severity`, `--ignore`, `--no-color`)
-2. **`.sentinel.toml`** configuration file
+1. **CLI Arguments** (e.g. `--severity`, `--ignore`, `--no-color`)
+2. **`.leakguard.toml`** configuration file
 3. **Built-in Defaults**
 
-If a `.sentinel.toml` file exists but contains syntax or validation errors, Sentinel exits immediately with exit code `2`.
+If a configuration file exists but contains syntax or validation errors, LeakGuard exits immediately with exit code `2`.
 
-### Example `.sentinel.toml`
+### Example `.leakguard.toml`
 
 ```toml
 [scan]
 # Maximum file size in bytes to scan (default: 5MB = 5242880)
 max_file_size = 5242880
 
-# Follow filesystem symlinks (default: false to prevent loops/escapes)
+# Whether to follow filesystem symlinks (default: false)
 follow_symlinks = false
 
-# Worker thread count (0 = auto-detect based on logical CPU cores)
+# Number of worker threads for scanning (0 = auto-detect based on logical CPU cores)
 workers = 0
 
 [ignore]
-# Glob patterns to ignore in addition to .gitignore and built-in rules
+# Glob patterns to ignore in addition to .gitignore and default ignore lists
 patterns = [
     "node_modules/**",
     "target/**",
@@ -348,7 +358,7 @@ patterns = [
 ]
 
 [allowlist]
-# Full 64-character SHA-256 fingerprints of verified non-secrets
+# SHA-256 fingerprints of verified non-secrets to suppress from reports
 fingerprints = [
     "8a21c43f9a72d3e18502f61e7b99c018a1a3b8d9e2f4c5b6a7d8e9f0123491cf"
 ]
@@ -362,91 +372,83 @@ minimum = 4.0
 
 ## Exit Codes
 
-Sentinel produces deterministic, standard exit codes:
+LeakGuard produces deterministic process exit codes designed for automated tooling and CI pipelines:
 
 | Exit Code | Meaning | Description |
 |:---:|:---|:---|
 | `0` | **Clean** | Scan completed successfully with zero unsuppressed findings. |
-| `1` | **Findings Detected** | One or more active secrets were detected. |
-| `2` | **Configuration / Argument Error** | Invalid CLI options, unknown flags, or malformed `.sentinel.toml`. |
-| `3` | **Runtime / I/O Error** | Nonexistent scan path, permission denied, or fatal traversal failure. |
+| `1` | **Findings Detected** | One or more active secrets were identified. |
+| `2` | **Configuration / Argument Error** | Invalid CLI options, unknown arguments, or malformed `.leakguard.toml`. |
+| `3` | **Runtime / I/O Error** | Nonexistent scan path, permission denied, or unrecoverable filesystem failure. |
 
 ---
 
 ## Performance
 
-Sentinel is engineered for high throughput and bounded memory usage:
-- **Filesystem Traversal**: Leverages the multi-threaded, `.gitignore`-aware `ignore` crate.
-- **Parallel Scanning**: Uses `rayon` work-stealing parallelism across available CPU cores.
-- **Memory Guards**: Skips files exceeding `max_file_size` via metadata before reading contents.
-- **Bounded Buffer Inspection**: Lines are read with a 64KB bounded reader to protect against memory exhaustion on minified single-line assets.
-- **Binary Preflight**: Content inspection is restricted to the first 8KB.
+LeakGuard is engineered for bounded resource consumption and high throughput:
+- **Filesystem Traversal**: Leverages the multi-threaded `ignore` crate for fast directory traversal.
+- **Parallel Scanning**: Work-stealing threadpool across CPU cores via `rayon`.
+- **Preflight Guards**: Metadata inspection skips files exceeding `max_file_size` before buffer allocation; binary inspection evaluates only the initial 8KB.
+- **Bounded Buffer Inspection**: Lines are read with a 64KB bounded reader to avoid large allocations on minified assets.
 
 ### Measured Microbenchmarks (Criterion on Rust Stable)
 
 *Measured on x86_64 Windows (AMD Ryzen, 100 samples per test via Criterion):*
 
-| Benchmark Scope | Operation | Latency (Median) | Rate |
+| Benchmark Target | Operation | Median Latency | Measured Rate |
 |:---|:---|:---:|:---:|
-| **Candidate Entropy** | Shannon entropy (20-char candidate) | ~2.39 µs | ~418,000 evaluations / sec / core |
-| **Candidate Entropy** | Shannon entropy (60-char candidate) | ~3.34 µs | ~299,000 evaluations / sec / core |
-| **Clean Line Inspection** | All 10 modular detectors on clean code line | ~4.34 µs | ~230,000 lines / sec / core |
-| **Secret Line Inspection** | Full pipeline on secret match (regex, entropy, context, SHA-256) | ~19.63 µs | ~51,000 lines / sec / core |
+| `shannon_entropy_sample` | 20-char candidate entropy calculation | ~2.39 µs | ~418,000 evaluations / sec / core |
+| `shannon_entropy_high` | 60-char candidate entropy calculation | ~3.34 µs | ~299,000 evaluations / sec / core |
+| `detector_scan_clean_line` | All 10 modular detectors on clean line | ~4.34 µs | ~230,000 lines / sec / core |
+| `detector_scan_secret_line` | Full pipeline on secret match (regex, entropy, context, SHA-256) | ~19.63 µs | ~51,000 lines / sec / core |
 
-*Note: Line evaluation throughput measures raw detector engine speed. Full repository scan throughput also incorporates filesystem I/O, directory traversal, gitignore matching, and OS scheduling.*
+*Note: These latency and rate numbers represent microbenchmarks of the detector engine and entropy calculations on individual lines. They do not represent end-to-end repository scanning throughput, which also depends on filesystem I/O, directory traversal, gitignore evaluation, and disk caching.*
 
 ---
 
 ## Testing
 
-Sentinel includes a comprehensive test matrix spanning unit tests, integration tests, security invariant checks, and regression suites:
+LeakGuard maintains a comprehensive automated test matrix spanning unit tests, integration tests, security invariant checks, and regression fixtures:
 
 ```bash
-# Run all unit, integration, and security tests
+# Run all unit and integration tests
 cargo test --all-targets
 
-# Run linters and format check
+# Check code formatting
 cargo fmt --check
+
+# Run Clippy linter with strict warning rejection
 cargo clippy --all-targets -- -D warnings
 
-# Build benchmarks without running
+# Verify benchmarks compile cleanly
 cargo bench --no-run
 ```
-
-### Security Tests
-
-The test suite explicitly asserts:
-- Raw detected credentials never appear in standard output.
-- Raw detected credentials never appear in error streams (stderr).
-- Raw detected credentials never appear in JSON serialization.
-- Fingerprints are strictly deterministic across runs.
-- Deduplication retains highest severity finding when multiple detectors match the same line.
 
 ---
 
 ## Limitations
 
-- **Pattern-Based Detection**: Pattern matching and Shannon entropy cannot guarantee detection of every novel, custom, or encrypted credential format.
-- **Obfuscated Secrets**: Split-string concatenation, base64-nested tokens, or dynamically reconstructed strings at runtime are beyond the scope of static source inspection.
-- **Short High-Entropy Strings**: Strings under 16 characters cannot be reliably detected via entropy analysis alone without inducing unacceptable false positive rates.
-- **Single-Line Inspection**: Detectors currently operate on individual lines; multi-line secrets that do not use identifiable header/footer blocks (like PEM keys) may not be fully detected.
+- **Heuristic Boundaries**: Pattern matching and Shannon entropy cannot guarantee detection of every novel, custom, or encrypted credential format.
+- **Obfuscated Secrets**: Programmatically assembled strings, multi-variable concatenations, or base64-nested credentials cannot be reliably detected via static line inspection.
+- **Short High-Entropy Strings**: Strings shorter than 16 characters cannot be classified reliably via Shannon entropy without unacceptable false positive rates.
+- **Line-Oriented Processing**: Detectors operate on individual lines; multi-line split secrets without standard header/footer blocks (such as PEM blocks) are not correlated across line boundaries.
 
 ---
 
 ## Roadmap
 
-- [ ] Interactive pre-commit hook installer (`sentinel init-hook`)
-- [ ] SARIF (Static Analysis Results Interchange Format) output for GitHub Code Scanning
-- [ ] Baseline snapshot file support (`sentinel baseline record / check`)
-- [ ] Additional detectors for specialized cloud providers (Stripe, Slack, GitLab, HashiCorp Vault)
-- [ ] Custom user-defined regex rules via `.sentinel.toml`
+- [ ] Interactive pre-commit hook installer (`leakguard init-hook`)
+- [ ] SARIF (Static Analysis Results Interchange Format) output for GitHub Code Scanning integration
+- [ ] Baseline snapshot management (`leakguard baseline record / check`)
+- [ ] Additional specialized detectors (e.g. Stripe API keys, Slack webhooks, GitLab tokens)
+- [ ] Custom user-defined regex rules via `.leakguard.toml`
 
 ---
 
 ## Project Structure
 
 ```
-sentinel/
+leakguard/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
@@ -495,7 +497,7 @@ sentinel/
 │   │   └── safe_uuid.json
 │   └── integration.rs
 ├── .gitignore
-├── .sentinel.toml.example
+├── .leakguard.toml.example
 ├── Cargo.toml
 ├── CHANGELOG.md
 ├── LICENSE

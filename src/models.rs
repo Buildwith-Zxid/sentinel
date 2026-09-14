@@ -128,7 +128,7 @@ pub struct ScanStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanReport {
     pub schema_version: u32,
-    pub sentinel_version: String,
+    pub leakguard_version: String,
     pub path: String,
     pub stats: ScanStats,
     pub findings: Vec<Finding>,
@@ -140,7 +140,7 @@ impl ScanReport {
     pub fn new(path: String, stats: ScanStats, findings: Vec<Finding>) -> Self {
         Self {
             schema_version: Self::CURRENT_SCHEMA_VERSION,
-            sentinel_version: env!("CARGO_PKG_VERSION").to_string(),
+            leakguard_version: env!("CARGO_PKG_VERSION").to_string(),
             path,
             stats,
             findings,
@@ -148,7 +148,7 @@ impl ScanReport {
     }
 }
 
-/// Rule metadata exposed via `sentinel rules`.
+/// Rule metadata exposed via `leakguard rules`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectorRuleInfo {
     pub id: String,

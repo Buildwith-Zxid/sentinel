@@ -1,11 +1,11 @@
 use clap::Parser;
 use std::process;
 
-use sentinel::cli::{Cli, Commands, RulesArgs, ScanArgs};
-use sentinel::config::Config;
-use sentinel::detector::DetectorRegistry;
-use sentinel::reporter::Reporter;
-use sentinel::scanner::Scanner;
+use leakguard::cli::{Cli, Commands, RulesArgs, ScanArgs};
+use leakguard::config::Config;
+use leakguard::detector::DetectorRegistry;
+use leakguard::reporter::Reporter;
+use leakguard::scanner::Scanner;
 
 // Deterministic exit codes
 const EXIT_OK: i32 = 0;
@@ -93,8 +93,8 @@ fn handle_rules(args: RulesArgs) {
 }
 
 fn handle_version() {
-    println!("sentinel {}", env!("CARGO_PKG_VERSION"));
-    println!("Local-first security CLI for secrets & credentials detection");
+    println!("leakguard {}", env!("CARGO_PKG_VERSION"));
+    println!("Native Rust secret and credential scanner for source repositories");
     println!("Engine: 100% Native Rust (Rayon + Ignore + SHA-256)");
     process::exit(EXIT_OK);
 }

@@ -1,9 +1,9 @@
-//! Example: Running Sentinel programmatically via Rust API
-use sentinel::{Config, Scanner, Severity};
+//! Example: Running LeakGuard programmatically via Rust API
+use leakguard::{Config, Scanner, Severity};
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Initializing Sentinel programmatic scanner...");
+    println!("Initializing LeakGuard programmatic scanner...");
 
     let config = Config::default();
     let scanner = Scanner::new(config, Some(Severity::Low));

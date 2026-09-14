@@ -67,7 +67,7 @@ impl Reporter {
         let stdout = io::stdout();
         let mut handle = stdout.lock();
 
-        writeln!(handle, "{}", self.color_bold("SENTINEL SECURITY SCAN"))?;
+        writeln!(handle, "{}", self.color_bold("LEAKGUARD SECURITY SCAN"))?;
         writeln!(
             handle,
             "{}",
@@ -128,12 +128,12 @@ impl Reporter {
         handle.flush()
     }
 
-    /// Formats the detector rules list for `sentinel rules`.
+    /// Formats the detector rules list for `leakguard rules`.
     pub fn print_rules(&self, rules: &[DetectorRuleInfo]) -> io::Result<()> {
         let stdout = io::stdout();
         let mut handle = stdout.lock();
 
-        writeln!(handle, "{}", self.color_bold("SENTINEL DETECTOR RULES"))?;
+        writeln!(handle, "{}", self.color_bold("LEAKGUARD DETECTOR RULES"))?;
         writeln!(
             handle,
             "{}",

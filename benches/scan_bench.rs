@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use sentinel::config::Config;
-use sentinel::detector::DetectorRegistry;
-use sentinel::entropy::shannon_entropy;
+use leakguard::config::Config;
+use leakguard::detector::DetectorRegistry;
+use leakguard::entropy::shannon_entropy;
 use std::path::Path;
 
 fn benchmark_entropy(c: &mut Criterion) {

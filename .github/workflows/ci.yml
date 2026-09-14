@@ -11,7 +11,7 @@ env:
 
 jobs:
   check-and-test:
-    name: Lint, Build, and Test
+    name: Lint, Build, Test, and Bench Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +32,9 @@ jobs:
 
       - name: Run Tests
         run: cargo test --all-targets -- --nocapture
+
+      - name: Verify Benchmark Compilation
+        run: cargo bench --no-run
 
       - name: Verify Release Build
         run: cargo build --release

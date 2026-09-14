@@ -1,12 +1,12 @@
 [package]
-name = "sentinel"
+name = "leakguard"
 version = "0.1.0"
 edition = "2021"
 authors = ["Mohd Zaid"]
-description = "Local-first security CLI for detecting accidentally exposed secrets and credentials in source code."
+description = "Native Rust secret and credential scanner for source repositories."
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/buildwith-zxid/sentinel"
+repository = "https://github.com/Buildwith-Zxid/leakguard"
 keywords = ["security", "secrets-detection", "cli", "credential-scanner", "scanner"]
 categories = ["command-line-utilities", "development-tools"]
 
@@ -25,11 +25,11 @@ criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3.17"
 
 [[bin]]
-name = "sentinel"
+name = "leakguard"
 path = "src/main.rs"
 
 [lib]
-name = "sentinel"
+name = "leakguard"
 path = "src/lib.rs"
 
 [[bench]]

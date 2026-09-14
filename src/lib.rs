@@ -1,7 +1,6 @@
-//! # Sentinel
+//! # LeakGuard
 //!
-//! A local-first security CLI for detecting accidentally exposed secrets
-//! and credentials inside source-code repositories.
+//! Native Rust secret and credential scanner for source repositories.
 
 pub mod cli;
 pub mod config;

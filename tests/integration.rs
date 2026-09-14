@@ -1,6 +1,6 @@
-use sentinel::config::Config;
-use sentinel::models::{ScanReport, Severity};
-use sentinel::scanner::Scanner;
+use leakguard::config::Config;
+use leakguard::models::{ScanReport, Severity};
+use leakguard::scanner::Scanner;
 use std::path::Path;
 
 #[test]
@@ -348,7 +348,7 @@ fn test_extremely_long_line_handled_safely() {
 
 #[test]
 fn test_versioned_json_schema() {
-    let stats = sentinel::models::ScanStats {
+    let stats = leakguard::models::ScanStats {
         files_scanned: 10,
         files_skipped: 2,
         duration_ms: 15,
@@ -357,7 +357,7 @@ fn test_versioned_json_schema() {
     let json_val: serde_json::Value = serde_json::to_value(&report).unwrap();
 
     assert_eq!(json_val["schema_version"], 1);
-    assert_eq!(json_val["sentinel_version"], "0.1.0");
+    assert_eq!(json_val["leakguard_version"], "0.1.0");
     assert_eq!(json_val["stats"]["files_scanned"], 10);
     assert_eq!(json_val["stats"]["files_skipped"], 2);
     assert!(json_val["findings"].is_array());

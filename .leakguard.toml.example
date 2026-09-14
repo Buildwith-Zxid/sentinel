@@ -1,5 +1,5 @@
-# Sentinel Configuration Example
-# Place this file as .sentinel.toml in your repository root or pass via CLI.
+# LeakGuard Configuration Example
+# Place this file as .leakguard.toml in your repository root or pass via CLI.
 
 [scan]
 # Maximum file size in bytes to scan (default: 5MB = 5242880)

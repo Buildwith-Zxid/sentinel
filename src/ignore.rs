@@ -1,7 +1,7 @@
 use ignore::overrides::{Override, OverrideBuilder};
 use std::path::Path;
 
-/// Directories that Sentinel skips by default regardless of configuration.
+/// Directories that LeakGuard skips by default regardless of configuration.
 pub const DEFAULT_SKIPPED_DIRS: &[&str] = &[
     ".git",
     "node_modules",
@@ -14,7 +14,7 @@ pub const DEFAULT_SKIPPED_DIRS: &[&str] = &[
 ];
 
 /// Encapsulates ignore logic, combining default directory skips, .gitignore rules,
-/// and custom patterns from .sentinel.toml and CLI arguments.
+/// and custom patterns from .leakguard.toml and CLI arguments.
 #[derive(Debug, Clone)]
 pub struct IgnoreEngine {
     custom_patterns: Vec<String>,
@@ -82,7 +82,7 @@ mod tests {
             "src/node_modules/package.json"
         )));
         assert!(IgnoreEngine::is_default_ignored_dir(&PathBuf::from(
-            "target/debug/sentinel"
+            "target/debug/leakguard"
         )));
         assert!(IgnoreEngine::is_default_ignored_dir(&PathBuf::from(
             ".git/HEAD"

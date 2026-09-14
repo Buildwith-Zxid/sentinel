@@ -4,10 +4,10 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "sentinel",
+    name = "leakguard",
     author = "Mohd Zaid",
     version,
-    about = "Local-first security CLI for detecting accidentally exposed secrets and credentials in source code.",
+    about = "Native Rust secret and credential scanner for source repositories.",
     long_about = None
 )]
 pub struct Cli {
@@ -49,7 +49,7 @@ pub struct ScanArgs {
     #[arg(long)]
     pub no_color: bool,
 
-    /// Explicit path to a .sentinel.toml configuration file
+    /// Explicit path to a .leakguard.toml configuration file
     #[arg(short, long)]
     pub config: Option<PathBuf>,
 }

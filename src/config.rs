@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 pub const DEFAULT_MAX_FILE_SIZE: u64 = 5 * 1024 * 1024; // 5 MB
 pub const DEFAULT_MIN_ENTROPY: f64 = 4.0;
-pub const CONFIG_FILE_NAME: &str = ".sentinel.toml";
+pub const CONFIG_FILE_NAME: &str = ".leakguard.toml";
+pub const LEGACY_CONFIG_FILE_NAME: &str = ".sentinel.toml";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
@@ -96,21 +97,33 @@ impl Config {
         }
     }
 
-    /// Automatically find and load `.sentinel.toml` in `dir` or default if not found.
+    /// Automatically find and load `.leakguard.toml` (or legacy `.sentinel.toml`) in `dir` or default if not found.
     ///
-    /// Returns an error if `.sentinel.toml` exists but contains invalid TOML syntax.
+    /// Returns an error if the configuration file exists but contains invalid TOML syntax.
     pub fn find_or_default(target_path: &Path) -> Result<(Self, Option<PathBuf>), String> {
-        let candidate = if target_path.is_dir() {
-            target_path.join(CONFIG_FILE_NAME)
+        let (candidate, legacy_candidate) = if target_path.is_dir() {
+            (
+                target_path.join(CONFIG_FILE_NAME),
+                target_path.join(LEGACY_CONFIG_FILE_NAME),
+            )
         } else if let Some(parent) = target_path.parent() {
-            parent.join(CONFIG_FILE_NAME)
+            (
+                parent.join(CONFIG_FILE_NAME),
+                parent.join(LEGACY_CONFIG_FILE_NAME),
+            )
         } else {
-            PathBuf::from(CONFIG_FILE_NAME)
+            (
+                PathBuf::from(CONFIG_FILE_NAME),
+                PathBuf::from(LEGACY_CONFIG_FILE_NAME),
+            )
         };
 
         if candidate.exists() && candidate.is_file() {
             let cfg = Self::from_file(&candidate)?;
             Ok((cfg, Some(candidate)))
+        } else if legacy_candidate.exists() && legacy_candidate.is_file() {
+            let cfg = Self::from_file(&legacy_candidate)?;
+            Ok((cfg, Some(legacy_candidate)))
         } else {
             Ok((Self::default(), None))
         }
