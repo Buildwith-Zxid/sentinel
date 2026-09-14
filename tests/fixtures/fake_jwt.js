@@ -1,0 +1,2 @@
+// Fake JWT token fixture
+const sessionToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmYWtlLXVzZXItaWQiLCJyb2xlIjoiYWRtaW4ifQ.c2VudGluZWxfZmFrZV9zaWduYXR1cmVfZm9yX3Rlc3Rpbmc";

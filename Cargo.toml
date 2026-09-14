@@ -1,0 +1,44 @@
+[package]
+name = "sentinel"
+version = "0.1.0"
+edition = "2021"
+authors = ["Mohd Zaid"]
+description = "Local-first security CLI for detecting accidentally exposed secrets and credentials in source code."
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/buildwith-zxid/sentinel"
+keywords = ["security", "secrets-detection", "cli", "credential-scanner", "scanner"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "cargo"] }
+ignore = "0.4.23"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+regex = "1.11"
+sha2 = "0.10"
+rayon = "1.10"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.17"
+
+[[bin]]
+name = "sentinel"
+path = "src/main.rs"
+
+[lib]
+name = "sentinel"
+path = "src/lib.rs"
+
+[[bench]]
+name = "scan_bench"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

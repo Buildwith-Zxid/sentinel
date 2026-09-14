@@ -1,0 +1,4 @@
+# Safe 40-character Git commit hashes - should not be flagged as secrets
+commit_hash = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+last_deployed_commit = "9f83301fa7b5b4fb9b5a0455a5ee9046c4309327"
+tree_sha = "cf23347e340b497cb101d2a45a0b73e5a3ad9c08"

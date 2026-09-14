@@ -1,0 +1,9 @@
+# Configuration template with placeholder tokens
+aws:
+  access_key: "YOUR_ACCESS_KEY_HERE"
+  secret_key: "CHANGE_ME_IMMEDIATELY"
+database:
+  url: "postgres://username:password@localhost:5432/testdb"
+api:
+  token: "sample_token_placeholder_value"
+  secret: "xxxxxxxxxxxxxxxxxxxxxxxx"

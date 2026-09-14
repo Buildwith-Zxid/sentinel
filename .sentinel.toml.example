@@ -1,0 +1,32 @@
+# Sentinel Configuration Example
+# Place this file as .sentinel.toml in your repository root or pass via CLI.
+
+[scan]
+# Maximum file size in bytes to scan (default: 5MB = 5242880)
+max_file_size = 5242880
+
+# Whether to follow filesystem symlinks during scan (default: false)
+follow_symlinks = false
+
+# Number of worker threads for parallel scanning (0 = auto-detect based on CPU cores)
+workers = 0
+
+[ignore]
+# Glob patterns to ignore in addition to .gitignore and default ignore lists
+patterns = [
+    "node_modules/**",
+    "target/**",
+    "tests/fixtures/**",
+    "**/*.min.js",
+    "**/*.lock"
+]
+
+[allowlist]
+# SHA-256 fingerprints of verified non-secrets to suppress from reports
+fingerprints = [
+    # "8a21c43f9a72d3e18502f61e7b99c018a1a3b8d9e2f4c5b6a7d8e9f012345678"
+]
+
+[entropy]
+# Shannon entropy threshold for high-entropy secret candidates (default: 4.0)
+minimum = 4.0
